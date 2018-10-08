@@ -7,8 +7,7 @@
 
 
 template<typename T>
-void raiseFail(const T &a, const T &b, std::string message, std::string filename, int line)
-{
+void raiseFail(const T &a, const T &b, std::string message, std::string filename, int line) {
     if (a != b) {
         std::cerr << message << " But " << a << " != " << b << ", " << filename << ":" << line << std::endl;
         throw std::runtime_error(message);
@@ -18,8 +17,7 @@ void raiseFail(const T &a, const T &b, std::string message, std::string filename
 #define EXPECT_THE_SAME(a, b, message) raiseFail(a, b, message, __FILE__, __LINE__)
 
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int benchmarkingIters = 10;
     int max_n = (1 << 24);
 
@@ -50,7 +48,8 @@ int main(int argc, char **argv)
             reference_max_sum = max_sum;
             reference_result = result;
         }
-        std::cout << "Max prefix sum: " << reference_max_sum << " on prefix [0; " << reference_result << ")" << std::endl;
+        std::cout << "Max prefix sum: " << reference_max_sum << " on prefix [0; " << reference_result << ")"
+                  << std::endl;
 
         {
             timer t;
@@ -81,36 +80,66 @@ int main(int argc, char **argv)
             context.init(device.device_id_opencl);
             context.activate();
             {
-                ocl::Kernel kernel(max_prefix_sum_kernel, max_prefix_sum_kernel_length, "max_prefix_sum");
-                bool printLog = true;
-                kernel.compile(printLog);
-                gpu::gpu_mem_32i input_vram, output;
-                input_vram.resizeN(n);
-                std::vector<int> result_data(n, 0);
+                ocl::Kernel max_prefix_kernel(max_prefix_sum_kernel, max_prefix_sum_kernel_length, "max_prefix_sum"),
+                        shift_to_start_kernel(max_prefix_sum_kernel, max_prefix_sum_kernel_length, "shift_to_start");
+
+                bool printLog = false;
+                max_prefix_kernel.compile(printLog);
+                shift_to_start_kernel.compile(printLog);
+
+                std::vector<int> numbers_ram(as), max_prefixes_ram(as), indexes_ram(n, 0);
+                for (int i = 0; i < n; ++i) {
+                    indexes_ram[i] = i + 1;
+                }
+
+                gpu::gpu_mem_32i numbers_vram, max_prefixes_vram, indexes_vram;
+
+                numbers_vram.resizeN(n);
+                max_prefixes_vram.resizeN(n);
+                indexes_vram.resizeN(n);
+
 
                 unsigned int workGroupSize = 128;
-                unsigned int global_work_size = (n + workGroupSize - 1) / workGroupSize * workGroupSize;
+                ocl::LocalMem numbers_local(workGroupSize * sizeof(int)),
+                        max_prefixes_local(workGroupSize * sizeof(int)), indexes_local(workGroupSize * sizeof(int));
 
                 timer t;
                 for (int i = 0; i < benchmarkingIters; ++i) {
-                    input_vram.writeN(as.data(), n);
-                    for (int step = 1; step < n; step *= 2) {
-                        kernel.exec(gpu::WorkSize(workGroupSize, global_work_size),
-                                    input_vram, step, n);
+                    numbers_vram.writeN(numbers_ram.data(), n);
+                    max_prefixes_vram.writeN(max_prefixes_ram.data(), n);
+                    indexes_vram.writeN(indexes_ram.data(), n);
+                    for (unsigned int elemCount = n;
+                         elemCount > 1;
+                         elemCount = (elemCount + workGroupSize - 1) / workGroupSize) {
+
+                        unsigned int workSize = (elemCount + workGroupSize - 1) / workGroupSize * workGroupSize;
+
+                        max_prefix_kernel.exec(gpu::WorkSize(workGroupSize, workSize),
+                                               numbers_vram,
+                                               max_prefixes_vram,
+                                               indexes_vram,
+                                               elemCount,
+                                               numbers_local,
+                                               max_prefixes_local,
+                                               indexes_local);
+
+                        shift_to_start_kernel.exec(gpu::WorkSize(workGroupSize, workSize),
+                                                   numbers_vram,
+                                                   max_prefixes_vram,
+                                                   indexes_vram,
+                                                   elemCount);
 
                     }
-                    input_vram.readN(result_data.data(), n);
-                    int max_sum = 0;
-                    int result = 0;
-                    for (int j = 0; j < n; j++) {
-                        int value = result_data[j];
-                        if (value >= max_sum) {
-                            max_sum = value;
-                            result = j + 1;
-                        }
+                    int max_prefix_sum = 0;
+                    int max_prefix_sum_index = 0;
+                    max_prefixes_vram.readN(&max_prefix_sum, 1);
+                    indexes_vram.readN(&max_prefix_sum_index, 1);
+                    if (max_prefix_sum < 0) {
+                        max_prefix_sum = 0;
+                        max_prefix_sum_index = 0;
                     }
-                    EXPECT_THE_SAME(reference_max_sum, max_sum, "GPU sum result should be consistent!");
-                    EXPECT_THE_SAME(reference_result, result, "GPU sum pos result should be consistent!");
+                    EXPECT_THE_SAME(reference_max_sum, max_prefix_sum, "GPU sum result should be consistent!");
+                    EXPECT_THE_SAME(reference_result, max_prefix_sum_index, "GPU sum pos result should be consistent!");
                     t.nextLap();
                 }
                 std::cout << "GPU: " << t.lapAvg() << "+-" << t.lapStd() << " s" << std::endl;

@@ -25,9 +25,9 @@ __kernel void matrix_transpose(__global const float *as,
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    if (mGlobalIdx < M && kGlobalIdx < K) {
-        const int kTransposeIdx = get_group_id(0) * mGroupSize + kLocalIdx;
-        const int mTransposeIdx = get_group_id(1) * mGroupSize + mLocalIdx;
+    const int kTransposeIdx = get_group_id(0) * mGroupSize + kLocalIdx;
+    const int mTransposeIdx = get_group_id(1) * mGroupSize + mLocalIdx;
+    if (mTransposeIdx < M && kTransposeIdx < K) {
         as_t[kTransposeIdx * M + mTransposeIdx] = localMem[mLocalIdx * mGroupSize + kLocalIdx];
     }
 

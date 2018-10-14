@@ -69,7 +69,7 @@ int main(int argc, char **argv)
     ocl::Kernel matrix_multiplication_kernel(matrix_multiplication, matrix_multiplication_length, "matrix_multiplication");
     matrix_multiplication_kernel.compile();
 
-    unsigned int work_group_size = 8;
+    unsigned int work_group_size = 16;
     ocl::LocalMem aLocalMem(work_group_size * work_group_size * sizeof(float));
     ocl::LocalMem bLocalMem(work_group_size * work_group_size * sizeof(float));
     unsigned int xWorkSize = (N + work_group_size - 1) / work_group_size * work_group_size;

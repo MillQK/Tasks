@@ -33,6 +33,8 @@ __kernel void matrix_multiplication(__global const float *as, // M * K
         for (int i = 0; i < workGroupSize; ++i) {
             sum += aTile[mLocalIdx * workGroupSize + i] * bTile[nLocalIdx + i * workGroupSize];
         }
+
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
 
     cs[mGlobalIdx * N + nGlobalIdx] = sum;
